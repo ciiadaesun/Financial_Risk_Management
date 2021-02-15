@@ -99,3 +99,15 @@ def copula_correlation_with_equity(equity_price_data , start_day , end_day) :
     copul_corr_range.reshape(-1)[min_number]
     copul_corr = copul_corr_range.reshape(-1)[min_number]
     return copul_corr
+
+def CDO_senior_mezzanin_equity(PD, copula_corr, PD_senior, PD_mezzanin , RR) :
+    ########################################
+    ## w_senior = 1 - WCDR(PD Senior) * LGD
+    ## w_mezzanin = 1 - WCDR(PD Mezzanin) * LGD - w_senior
+    ## w_equity = 1 - w_senior - w_mezzanin
+    ########################################
+    LGD = 1-RR
+    senior_ratio = 1-(Worst_Case_Default_Rate(PD,copula_corr,alpha = PD_senior) * LGD)
+    mezzanin_ratio = 1- (Worst_Case_Default_Rate(PD,copula_corr,alpha = PD_mezzanin) * LGD) - senior_ratio
+    equity_ratio = 1- senior_ratio - mezzanin_ratio
+    return senior_ratio, mezzanin_ratio, equity_ratio
