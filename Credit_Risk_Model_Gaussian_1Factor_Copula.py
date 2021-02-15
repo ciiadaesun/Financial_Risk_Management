@@ -84,7 +84,7 @@ def copula_correlation_with_equity(equity_price_data , start_day , end_day) :
     ############################################## 
     ## Using Equity Corr > Calculate Copula Corr #
     ############################################## 
-    Price.index = pd.to_datetime(Price.index)
+    equity_price_data.index = pd.to_datetime(equity_price_data.index)
     Price = pd.DataFrame(equity_price_data).resample('M').last()
     Return = Price.pct_change()[pd.to_datetime(start_day) : pd.to_datetime(end_day)]
     eq_corr = pd.DataFrame(np.triu(Return.corr())).applymap(lambda x : np.nan if x == 1 or x == 0 else x)
