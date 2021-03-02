@@ -10,15 +10,21 @@ import pandas as pd
 from scipy.stats import norm
 
 Z_fun = lambda copula_corr , M , epsilon : np.sqrt(copula_corr) * M + np.sqrt(1-copula_corr) * epsilon
+
 tau_fun = lambda Z,PD : -np.log(1-norm.cdf(Z))/PD
-def one_factor_copula_simulation(port_principal_list,copula_corr,T,RR,PD,simul_num = 10000,alpha= 0.001) :
+
+def one_factor_copula_simulation(port_principal_list,T,RR,PD,copula_corr = 'Auto',simul_num = 10000,alpha= 0.001, M = 2.5) :
     ###############################################
     # port_principal_list is Principal Value List #
     # for example : [100,100,100,...]             #
     ###############################################
     LGD = 1-RR
+    b = (0.11852 - 0.05478 * np.log(PD))**2
+    MA =  ( 1 + (M-2.5)*b )/(1-1.5*b)
     Total_num = len(port_principal_list)
     M = np.random.normal(size = (1,simul_num))
+    if copula_corr == 'Auto' :
+        copula_corr = 0.12 * (1 - np.exp(-50 * PD))/(1-np.exp(-50 * PD)) + 0.24 * ( 1- (1-np.exp(-50 * PD))/(1-np.exp(-50)) )
     ##########################
     # fast simulation method #
     ##########################
@@ -40,15 +46,11 @@ def one_factor_copula_simulation(port_principal_list,copula_corr,T,RR,PD,simul_n
     Default_Rate_Std = Default_Rate.std()
     EL = Total_Simul_Loss.mean()
     UEL = pd.Series(Total_Simul_Loss).quantile(1-alpha)
-    RC = UEL - EL
-    return {'simul_result' : Total_Simul_Loss ,'expected_loss' :EL, 'unexpected_loss':UEL, 'Risk_Capital':RC, 'Default_Corr' : Default_Corr, "EDR" : EDR, "Default_Rate_Std": Default_Rate_Std, 'WCDR' : WCDR}
+    RC = (UEL - EL) * MA
+    return {'simul_result' : Total_Simul_Loss ,'expected_loss' :EL, 'unexpected_loss':UEL, 'Risk_Capital':RC, 'Default_Corr' : Default_Corr, "EDR" : EDR, "Default_Rate_Std": Default_Rate_Std, 'WCDR' : WCDR , 'b' : b , 'MA' : MA}
 
-def Calibrate_Copula_Corr(port_principal_list,actual_default_std, T, RR,PD, simul_num = 10000) :
-    #######################################
-    ## Using actual std of default prob, ## 
-    ## Calibrate Copula Correlation      ##
-    #######################################
-    DR_std = np.vectorize(lambda i : one_factor_copula_simulation(port_principal_list,i,T,RR,PD,simul_num)['Default_Rate_Std'])
+def Calibrate_Copula_Corr(port_principal_list,actual_default_std, T, RR,PD, simul_num = 10000, M = 2.5) :
+    DR_std = np.vectorize(lambda i : one_factor_copula_simulation(port_principal_list,T,RR,PD,copula_corr = i,simul_num = simul_num,alpha= 0.001 , M = M)['Default_Rate_Std'])
     Corr_Range = np.linspace(0,0.8,20+1)
     Simulated_Std = DR_std(Corr_Range)
     Copula_Correl = Corr_Range[np.abs(Simulated_Std - actual_default_std).argmin()]
@@ -58,23 +60,31 @@ def Worst_Case_Default_Rate(PD,copula_corr,alpha = 0.001) :
     WCDR = norm.cdf((norm.ppf(PD) +np.sqrt(copula_corr) * norm.ppf(1-alpha))/(np.sqrt(1-copula_corr)) )
     return WCDR
 
-def Credit_VaR_Gaussian_Copula(port_principal_list, copula_corr, RR, PD, alpha = 0.001) :
+def Credit_VaR_Gaussian_Copula(port_principal_list, RR, PD,copula_corr = 'Auto', alpha = 0.001, M = 2.5) :
+    if copula_corr == 'Auto' :
+        copula_corr = copula_corr = 0.12 * (1 - np.exp(-50 * PD))/(1-np.exp(-50 * PD)) + 0.24 * ( 1- (1-np.exp(-50 * PD))/(1-np.exp(-50)) )
     LGD = 1-RR
     Total_Principal = np.array(port_principal_list).sum()
     WCDR = Worst_Case_Default_Rate(PD,copula_corr,alpha)
     UEL = Total_Principal * WCDR * LGD
-    return {'unexpected_loss':UEL,'WCDR':WCDR}
+    b = (0.11852 - 0.05478 * np.log(PD))**2
+    MA =  ( 1 + (M-2.5)*b )/(1-1.5*b)    
+    return {'unexpected_loss':UEL,'WCDR':WCDR, 'b':b,'MA':MA}
 
-def Credit_Risk_Capital_Gaussian_Copula(port_principal_list , copula_corr, RR , PD , alpha = 0.001) :
+def Credit_Risk_Capital_Gaussian_Copula(port_principal_list , RR , PD ,copula_corr = 'Auto', alpha = 0.001, M = 2.5) :
+    if copula_corr == 'Auto' :
+        copula_corr = copula_corr = 0.12 * (1 - np.exp(-50 * PD))/(1-np.exp(-50 * PD)) + 0.24 * ( 1- (1-np.exp(-50 * PD))/(1-np.exp(-50)) )
     Total_Principal = np.array(port_principal_list).sum()
     LGD = 1-RR
-    my_dict = Credit_VaR_Gaussian_Copula(port_principal_list, copula_corr, RR, PD, alpha )
+    my_dict = Credit_VaR_Gaussian_Copula(port_principal_list, RR, PD, copula_corr,alpha )
     P_range = np.arange(0.001,1,0.001)
     Default_Rate = norm.cdf((norm.ppf(PD) + np.sqrt(copula_corr) * norm.ppf(P_range))/np.sqrt(1-copula_corr))
     EDR = Default_Rate.mean()
     UEL = my_dict['unexpected_loss']
     EL = Total_Principal *EDR * (1-RR)
-    RC = UEL - EL
+    b = (0.11852 - 0.05478 * np.log(PD))**2
+    MA =  ( 1 + (M-2.5)*b )/(1-1.5*b)      
+    RC = (UEL - EL) * MA
     my_dict['expected_loss'] = EL , 
     my_dict['Risk_Capital'] = RC
     my_dict['EDR'] = EDR
